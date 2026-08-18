@@ -15,6 +15,7 @@ test('work archive page exposes adoption, explicit enable, status and pending de
   assert.match(page, /自动归档/)
   assert.match(page, /待补媒体/)
   assert.match(page, /待确认会话/)
+  assert.match(page, /全部按接管前旧会话排除/)
   assert.match(page, /window\.confirm/)
   assert.match(page, /EventSource/)
 })

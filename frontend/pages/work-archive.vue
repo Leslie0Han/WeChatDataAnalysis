@@ -98,7 +98,15 @@
             <h2>待确认会话</h2>
             <p>这里只展示会话身份；确认纳入前不会读取内容或创建归档目录。</p>
           </div>
-          <span class="count-badge">{{ pending.length }}</span>
+          <div class="pending-head-actions">
+            <button
+              v-if="pending.length"
+              class="secondary compact"
+              :disabled="working"
+              @click="excludeCurrentPendingAsBaseline"
+            >全部按接管前旧会话排除</button>
+            <span class="count-badge">{{ pending.length }}</span>
+          </div>
         </div>
         <div v-if="pending.length" class="pending-list">
           <article v-for="item in pending" :key="item.username" class="pending-item">
@@ -295,6 +303,31 @@ const decide = async (username, decision) => {
   await loadRuntime()
 }
 
+const excludeCurrentPendingAsBaseline = async () => {
+  if (!profile.value || !pending.value.length) return
+  const confirmed = window.confirm(
+    `将当前 ${pending.value.length} 个待确认会话标记为接管前旧会话并排除？这不会读取或删除聊天内容。`
+  )
+  if (!confirmed) return
+  working.value = true
+  try {
+    const existing = Array.isArray(profile.value.excludedUsernames) ? profile.value.excludedUsernames : []
+    const pendingNames = pending.value.map((item) => item.username).filter(Boolean)
+    const result = await api.updateWorkArchiveProfile(profile.value.id, {
+      excludedUsernames: [...new Set([...existing, ...pendingNames])],
+      pendingUsernames: [],
+      pendingMeta: {},
+    })
+    profile.value = result.profile
+    pending.value = []
+    notify('已将当前待确认列表记为接管前旧会话。')
+  } catch (error) {
+    notify(error?.message || '批量排除旧会话失败', 'error')
+  } finally {
+    working.value = false
+  }
+}
+
 const includeConversation = async (item) => {
   if (!window.confirm(`确认把“${item.displayName || item.username}”纳入工作归档吗？`)) return
   await decide(item.username, 'included')
@@ -350,6 +383,8 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .switch-label { display: flex; gap: 8px; align-items: center; font-size: 12px; font-weight: 700; }
 .switch-label input { width: 18px; height: 18px; accent-color: #07b75b; }
 .pending-list { display: grid; gap: 10px; margin-top: 18px; }
+.pending-head-actions { display: flex; align-items: center; gap: 10px; }
+.compact { padding: 7px 10px; }
 .pending-item { border: 1px solid #e7ece9; border-radius: 12px; padding: 13px 14px; }
 .pending-item > div:first-child { display: grid; gap: 4px; min-width: 0; }
 .pending-item small { overflow: hidden; text-overflow: ellipsis; }

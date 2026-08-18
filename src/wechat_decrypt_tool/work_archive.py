@@ -760,6 +760,22 @@ class WorkArchiveService:
         )
         profile.validate()
         account_dir, realtime = self._account_realtime(profile)
+        baseline_preview = chat_export.build_chat_export_targets_preview(
+            account_dir=account_dir,
+            source="realtime",
+            rt_conn=realtime,
+            include_hidden=False,
+            include_official=False,
+        )
+        if str(baseline_preview.get("source") or "") != "realtime":
+            raise RuntimeError("Realtime WCDB became unavailable while capturing the adoption baseline.")
+        included = set(profile.includedUsernames)
+        excluded = set(profile.excludedUsernames)
+        for target in baseline_preview.get("targets") or []:
+            username = str(target.get("username") or "").strip()
+            if username and username not in included and username not in excluded:
+                profile.excludedUsernames.append(username)
+                excluded.add(username)
         state = WorkArchiveState(profile)
         archive_counts = {
             str(item.get("username") or ""): int(item.get("archiveCount") or 0)
@@ -782,7 +798,12 @@ class WorkArchiveService:
                 self._emit(profile.id, "adoption_progress", current=index, total=len(profile.includedUsernames))
         self.store.save(profile)
         self._write_status_report(profile, {"state": "disabled", "message": "接管完成，等待用户开启自动归档。"})
-        self._emit(profile.id, "adopted", conversations=len(profile.includedUsernames))
+        self._emit(
+            profile.id,
+            "adopted",
+            conversations=len(profile.includedUsernames),
+            baselineExcluded=len(profile.excludedUsernames),
+        )
         return {"status": "success", "profile": profile.to_dict(), "preflight": report}
 
     def set_conversation_status(self, profile_id: str, username: str, status: str) -> dict[str, Any]:

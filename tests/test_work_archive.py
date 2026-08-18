@@ -198,6 +198,18 @@ def test_adoption_seeds_overlap_and_keeps_auto_archive_disabled(tmp_path: Path, 
         ),
         patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
         patch.object(work_archive.chat_export, "_iter_rows_for_conversation", return_value=rows),
+        patch.object(
+            work_archive.chat_export,
+            "build_chat_export_targets_preview",
+            return_value={
+                "source": "realtime",
+                "targets": [
+                    {"username": username},
+                    {"username": "known-old"},
+                    {"username": "unplanned-existing"},
+                ],
+            },
+        ),
     ):
         result = service.adopt(
             profile_id="work-chats", name="Work chats", account="account-a", archive_root=str(root)
@@ -206,6 +218,8 @@ def test_adoption_seeds_overlap_and_keeps_auto_archive_disabled(tmp_path: Path, 
     assert profile.enabled is False
     assert profile.includedUsernames == [username]
     assert "known-old" in profile.excludedUsernames
+    assert "unplanned-existing" in profile.excludedUsernames
+    assert profile.pendingUsernames == []
     state = work_archive.WorkArchiveState(profile)
     with state.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM message_keys").fetchone()[0] == 1
