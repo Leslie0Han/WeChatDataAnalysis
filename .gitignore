@@ -10,6 +10,16 @@ wheels/
 # Virtual environments
 .venv
 /output/
+/output/work_archive/
+**/.work-archive/
+**/聊天记录归档/
+**/work-archive-data/
+*.work-archive.local.json
+work-archive-test-config.json
+*.sqlite-wal
+*.sqlite-shm
+*.secret
+*.key
 /.native-core-cache-v1/
 /.native-core-license-v1/
 /.playwright-cli/
