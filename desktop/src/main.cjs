@@ -43,6 +43,7 @@ const {
   resolveBackendStartupTimeoutMs,
   shouldRetryBackendOnDifferentPort,
 } = require("./backend-startup.cjs");
+const { canAcceptAbortedSameOriginNavigation } = require("./navigation-load-policy.cjs");
 const { applyNativeCoreRuntimePolicy } = require("./native-core-runtime.cjs");
 const {
   ENV_INTEGRITY_NATIVE_PATH,
@@ -2544,9 +2545,16 @@ async function loadWithRetry(win, url) {
       logMain(`[main] loadWithRetry success attempt=${attempt} elapsedMs=${Date.now() - startedAt} url=${url}`);
       return;
     } catch (err) {
+      const currentUrl = String(win?.webContents?.getURL?.() || "");
       logMain(
-        `[main] loadWithRetry failure attempt=${attempt} elapsedMs=${Date.now() - startedAt} url=${url} error=${err?.message || err}`
+        `[main] loadWithRetry failure attempt=${attempt} elapsedMs=${Date.now() - startedAt} url=${url} currentUrl=${currentUrl} error=${err?.message || err}`
       );
+      if (canAcceptAbortedSameOriginNavigation(err, currentUrl, url)) {
+        logMain(
+          `[main] loadWithRetry accepted same-origin redirect attempt=${attempt} currentUrl=${currentUrl}`
+        );
+        return;
+      }
       if (Date.now() - startedAt > 60_000) throw new Error(`Failed to load URL in time: ${url}`);
       await new Promise((r) => setTimeout(r, 500));
     }
