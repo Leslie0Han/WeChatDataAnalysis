@@ -128,26 +128,56 @@ def test_adoption_preflight_accepts_matching_archive(tmp_path: Path):
     service = work_archive.WorkArchiveService()
     with (
         patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
-        patch.object(work_archive.chat_export, "_estimate_conversation_message_count", return_value=source_count),
+        patch.object(work_archive.chat_export, "_iter_rows_for_conversation", return_value=[_row(1, create_time=1)]),
+        patch.object(work_archive, "_archive_record_matches_source_row", return_value=True),
     ):
         report = service.preflight_adoption(account="account-a", archive_root=str(root))
     assert report["ok"] is True
     assert report["conversationCount"] == 1
     assert report["messageCount"] == 1
+    assert report["pendingMessageCount"] == 0
     assert (root / ".work-archive" / "adoption-diff.json").exists()
 
 
-def test_adoption_preflight_blocks_count_mismatch(tmp_path: Path):
+def test_adoption_preflight_accepts_verified_realtime_backlog(tmp_path: Path):
     root = tmp_path / "archive"
     _make_adoption_fixture(root)
     service = work_archive.WorkArchiveService()
     with (
         patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
-        patch.object(work_archive.chat_export, "_estimate_conversation_message_count", return_value=2),
+        patch.object(
+            work_archive.chat_export,
+            "_iter_rows_for_conversation",
+            return_value=[_row(1, create_time=1), _row(2, create_time=2)],
+        ),
+        patch.object(work_archive, "_archive_record_matches_source_row", return_value=True),
     ):
         report = service.preflight_adoption(account="account-a", archive_root=str(root))
-    assert report["ok"] is False
-    assert "source=2, archive=1" in report["details"][0]["errors"]
+    assert report["ok"] is True
+    assert report["pendingMessageCount"] == 1
+    assert report["details"][0]["pendingCount"] == 1
+
+
+def test_adoption_preflight_blocks_source_behind_or_non_prefix(tmp_path: Path):
+    root = tmp_path / "archive"
+    _make_adoption_fixture(root)
+    service = work_archive.WorkArchiveService()
+    with (
+        patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
+        patch.object(work_archive.chat_export, "_iter_rows_for_conversation", return_value=[]),
+    ):
+        behind = service.preflight_adoption(account="account-a", archive_root=str(root))
+    assert behind["ok"] is False
+    assert "source=0 is behind archive=1" in behind["details"][0]["errors"]
+
+    with (
+        patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
+        patch.object(work_archive.chat_export, "_iter_rows_for_conversation", return_value=[_row(1, create_time=1)]),
+        patch.object(work_archive, "_archive_record_matches_source_row", return_value=False),
+    ):
+        non_prefix = service.preflight_adoption(account="account-a", archive_root=str(root))
+    assert non_prefix["ok"] is False
+    assert "archive is not a realtime prefix" in non_prefix["details"][0]["errors"][0]
 
 
 def test_adoption_seeds_overlap_and_keeps_auto_archive_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -157,7 +187,15 @@ def test_adoption_seeds_overlap_and_keeps_auto_archive_disabled(tmp_path: Path, 
     rows = [_row(index, server_id=1000 + index, create_time=index) for index in range(1, 121)]
     service = work_archive.WorkArchiveService()
     with (
-        patch.object(service, "preflight_adoption", return_value={"ok": True, "status": "success"}),
+        patch.object(
+            service,
+            "preflight_adoption",
+            return_value={
+                "ok": True,
+                "status": "success",
+                "details": [{"username": username, "archiveCount": 1}],
+            },
+        ),
         patch.object(service, "_account_realtime", return_value=(tmp_path / "account", object())),
         patch.object(work_archive.chat_export, "_iter_rows_for_conversation", return_value=rows),
     ):
@@ -170,8 +208,8 @@ def test_adoption_seeds_overlap_and_keeps_auto_archive_disabled(tmp_path: Path, 
     assert "known-old" in profile.excludedUsernames
     state = work_archive.WorkArchiveState(profile)
     with state.connect() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM message_keys").fetchone()[0] == 100
-        assert state.cursor(conn, username) == (120, 0, 120)
+        assert conn.execute("SELECT COUNT(*) FROM message_keys").fetchone()[0] == 1
+        assert state.cursor(conn, username) == (1, 0, 1)
 
 
 def test_pending_conversation_requires_explicit_status_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

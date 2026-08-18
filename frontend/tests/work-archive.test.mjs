@@ -11,6 +11,7 @@ const api = readFileSync(resolve(root, 'composables/useApi.js'), 'utf8')
 
 test('work archive page exposes adoption, explicit enable, status and pending decisions', () => {
   assert.match(page, /接管预检/)
+  assert.match(page, /条待追赶/)
   assert.match(page, /自动归档/)
   assert.match(page, /待补媒体/)
   assert.match(page, /待确认会话/)

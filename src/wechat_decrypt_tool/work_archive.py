@@ -420,6 +420,25 @@ def _record_from_message(msg: dict[str, Any], display_names: dict[str, str], arc
     }
 
 
+def _archive_record_matches_source_row(record: dict[str, Any], row: Any, username: str) -> bool:
+    try:
+        msg = chat_export._parse_message_for_export(
+            row=row,
+            conv_username=username,
+            is_group=bool(username.endswith("@chatroom")),
+            resource_conn=None,
+            resource_chat_id=None,
+            resolve_display_name=lambda value: value,
+        )
+    except Exception:
+        return False
+    return (
+        int(record.get("ts") or 0) == int(msg.get("createTime") or 0)
+        and str(record.get("sender_wxid") or "") == str(msg.get("senderUsername") or "")
+        and str(record.get("type") or "text") == str(msg.get("renderType") or "text")
+    )
+
+
 def _render_markdown(name: str, username: str, records: list[dict[str, Any]]) -> str:
     lines = [f"# {name} 聊天记录", ""]
     if records:
@@ -565,21 +584,43 @@ class WorkArchiveService:
                     missing_media += 1
             if missing_media:
                 errors.append(f"manifest has {missing_media} missing media targets")
+            source_rows: list[Any] = []
             try:
-                source_count = chat_export._estimate_conversation_message_count(
-                    account_dir=account_dir,
-                    conv_username=username,
-                    start_time=None,
-                    end_time=None,
-                    source="realtime",
-                    rt_conn=realtime,
+                source_rows = list(
+                    chat_export._iter_rows_for_conversation(
+                        account_dir=account_dir,
+                        conv_username=username,
+                        start_time=None,
+                        end_time=None,
+                        source="realtime",
+                        rt_conn=realtime,
+                    )
                 )
             except Exception as exc:
-                source_count = -1
                 errors.append(f"realtime count failed: {exc}")
+            source_count = (
+                len(source_rows)
+                if not any(error.startswith("realtime count failed:") for error in errors)
+                else -1
+            )
             archive_count = len(records)
-            if source_count >= 0 and archive_count != source_count:
-                errors.append(f"source={source_count}, archive={archive_count}")
+            pending_count = 0
+            if source_count >= 0:
+                if source_count < archive_count:
+                    errors.append(f"source={source_count} is behind archive={archive_count}")
+                else:
+                    mismatch_index = next(
+                        (
+                            index
+                            for index, (record, row) in enumerate(zip(records, source_rows), start=1)
+                            if not _archive_record_matches_source_row(record, row, username)
+                        ),
+                        0,
+                    )
+                    if mismatch_index:
+                        errors.append(f"archive is not a realtime prefix at message {mismatch_index}")
+                    else:
+                        pending_count = source_count - archive_count
             details.append(
                 {
                     "username": username,
@@ -587,6 +628,7 @@ class WorkArchiveService:
                     "planCount": expected_count,
                     "archiveCount": archive_count,
                     "sourceCount": source_count,
+                    "pendingCount": pending_count,
                     "manifestCount": len(manifest),
                     "missingMedia": missing_media,
                     "errors": errors,
@@ -600,6 +642,7 @@ class WorkArchiveService:
             "archiveRoot": str(root),
             "conversationCount": len(details),
             "messageCount": sum(max(0, int(item["archiveCount"])) for item in details),
+            "pendingMessageCount": sum(max(0, int(item["pendingCount"])) for item in details),
             "details": details,
         }
         if save_report:
@@ -647,6 +690,10 @@ class WorkArchiveService:
         profile.validate()
         account_dir, realtime = self._account_realtime(profile)
         state = WorkArchiveState(profile)
+        archive_counts = {
+            str(item.get("username") or ""): int(item.get("archiveCount") or 0)
+            for item in report.get("details") or []
+        }
         with state.connect() as conn:
             for index, username in enumerate(profile.includedUsernames, start=1):
                 rows = list(
@@ -659,7 +706,8 @@ class WorkArchiveService:
                         rt_conn=realtime,
                     )
                 )
-                state.remember_rows(conn, username, rows[-100:])
+                archived_rows = rows[: archive_counts.get(username, 0)]
+                state.remember_rows(conn, username, archived_rows[-100:])
                 self._emit(profile.id, "adoption_progress", current=index, total=len(profile.includedUsernames))
         self.store.save(profile)
         self._write_status_report(profile, {"state": "disabled", "message": "接管完成，等待用户开启自动归档。"})

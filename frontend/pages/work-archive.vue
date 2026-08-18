@@ -40,7 +40,10 @@
 
       <div v-if="preflight" class="result" :class="preflight.ok ? 'success' : 'error'">
         <strong>{{ preflight.ok ? '核验通过' : '暂不能接管' }}</strong>
-        <span>{{ preflight.conversationCount }} 个会话，{{ preflight.messageCount }} 条消息</span>
+        <span>
+          {{ preflight.conversationCount }} 个会话，{{ preflight.messageCount }} 条已归档消息
+          <template v-if="preflight.pendingMessageCount">，{{ preflight.pendingMessageCount }} 条待追赶</template>
+        </span>
         <ul v-if="!preflight.ok">
           <li v-for="item in blockedDetails" :key="item.username">
             {{ item.displayName }}：{{ item.errors.join('；') }}
