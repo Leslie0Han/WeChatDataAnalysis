@@ -47,7 +47,7 @@ LEGACY_LOCAL_TYPE_LABELS = {
 }
 LEGACY_SOURCE_TYPE_COMPATIBILITY = {
     "公众号": {"link"},
-    "链接卡片": {"link", "text"},
+    "链接卡片": {"link", "system", "text"},
     "聊天记录转发": {"chathistory"},
     "视频号": {"chathistory", "link"},
     "通话": {"voip"},
@@ -500,11 +500,13 @@ def _archive_record_matches_source_row(record: dict[str, Any], row: Any, usernam
         return False
     archive_type = str(record.get("type") or "text")
     source_type = str(msg.get("renderType") or "text")
+    source_archive_type = _legacy_archive_type(row, msg)
     if int(record.get("ts") or 0) != int(msg.get("createTime") or 0):
         return False
-    if not _legacy_type_is_compatible(archive_type, source_type):
+    if archive_type != source_archive_type and not _legacy_type_is_compatible(archive_type, source_type):
         return False
-    sender_matches = str(record.get("sender_wxid") or "") == str(msg.get("senderUsername") or "")
+    stable_source_sender = str(getattr(row, "sender_username", "") or msg.get("senderUsername") or "")
+    sender_matches = str(record.get("sender_wxid") or "") == stable_source_sender
     return sender_matches or archive_type in {"system", "链接卡片"}
 
 

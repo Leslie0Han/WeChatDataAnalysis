@@ -311,6 +311,22 @@ def test_archive_prefix_accepts_known_legacy_parser_differences():
             "conversation",
         )
 
+    legacy_card_message = {**system_message, "createTime": 100}
+    with patch.object(work_archive.chat_export, "_parse_message_for_export", return_value=legacy_card_message):
+        assert work_archive._archive_record_matches_source_row(
+            {**_record(100), "type": "链接卡片", "sender_wxid": "legacy-sender"},
+            SimpleNamespace(local_type=0, sender_username="resolved-sender"),
+            "conversation",
+        )
+
+    forwarded_message = {**base_message, "renderType": "chatHistory"}
+    with patch.object(work_archive.chat_export, "_parse_message_for_export", return_value=forwarded_message):
+        assert work_archive._archive_record_matches_source_row(
+            {**_record(100), "type": "聊天记录转发", "sender_wxid": "stable-sender"},
+            SimpleNamespace(local_type=0, sender_username="stable-sender"),
+            "conversation",
+        )
+
 
 def test_pending_media_queue_survives_restart(tmp_path: Path):
     profile = _profile(tmp_path / "archive")
