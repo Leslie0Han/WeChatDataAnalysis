@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from typing import Any, Callable, Optional
 from urllib.parse import urlencode
 
@@ -1389,6 +1390,59 @@ def _tools_catalog(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
     return payload
 
 
+def _archive_service():
+    from ..work_archive import WORK_ARCHIVE_SERVICE
+
+    return WORK_ARCHIVE_SERVICE
+
+
+def _archive_list_profiles(_: dict[str, Any], __: McpToolContext) -> dict[str, Any]:
+    return {"status": "success", "profiles": _archive_service().list_profiles()}
+
+
+def _archive_get_status(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    return _archive_service().status(_str(args, "profile_id"))
+
+
+def _archive_list_pending(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    return _archive_service().list_pending(_str(args, "profile_id"))
+
+
+def _archive_preview_sync(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    return _archive_service().preview_sync(_str(args, "profile_id"))
+
+
+def _archive_verify(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    return _archive_service().verify(_str(args, "profile_id"))
+
+
+def _archive_set_conversation_status(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    profile = _archive_service().set_conversation_status(
+        _str(args, "profile_id"), _str(args, "username"), _str(args, "status")
+    )
+    return {"status": "success", "profile": profile}
+
+
+def _archive_run_sync(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    profile_id = _str(args, "profile_id")
+    service = _archive_service()
+    service.get_profile(profile_id)
+    threading.Thread(
+        target=service.run_sync,
+        kwargs={"profile_id": profile_id, "reason": "mcp"},
+        name=f"work-archive-mcp-{profile_id}",
+        daemon=True,
+    ).start()
+    return {"status": "accepted", "profileId": profile_id}
+
+
+def _archive_cancel_sync(args: dict[str, Any], _: McpToolContext) -> dict[str, Any]:
+    profile_id = _str(args, "profile_id")
+    service = _archive_service()
+    service.get_profile(profile_id)
+    return {"status": "success", "profileId": profile_id, "cancelRequested": service.cancel(profile_id)}
+
+
 COMMON_ACCOUNT = {"account": string_schema("Optional chat account name.")}
 CHAT_SOURCE = {
     "source": string_schema(
@@ -1408,6 +1462,16 @@ def _install_tools() -> None:
     _register("wechat.core.list_tools", "List WeChat MCP tools, optionally filtered by package.", object_schema({"package": string_schema("Optional package name."), "cursor": string_schema("Optional numeric cursor."), "limit": int_schema("Maximum tools to return.", minimum=1, maximum=100)}), _tools_catalog, package="wechat.core")
     _register("wechat.core.list_accounts", "List WeChat chat accounts available to WeChatDataAnalysis.", object_schema(), _list_accounts, package="wechat.core")
     _register("wechat.core.get_account_info", "Return database and account metadata for one chat account.", object_schema(COMMON_ACCOUNT), _get_account_info, package="wechat.core")
+
+    archive_profile_schema = {"profile_id": string_schema("Registered work archive profile id. Arbitrary output paths are not accepted.")}
+    _register("wechat.archive.list_profiles", "List registered local work archive profiles.", object_schema(), _archive_list_profiles, package="wechat.archive")
+    _register("wechat.archive.get_status", "Return sync, pending-conversation, and pending-media status for a registered profile.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_get_status, package="wechat.archive")
+    _register("wechat.archive.list_pending", "List newly detected conversations awaiting explicit user approval. This tool never reads their messages.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_list_pending, package="wechat.archive")
+    _register("wechat.archive.preview_sync", "Preview how many realtime messages would be appended to a registered profile without writing archive files.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_preview_sync, package="wechat.archive")
+    _register("wechat.archive.verify", "Verify the eight-field archive schema for every included conversation in a registered profile.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_verify, package="wechat.archive")
+    _register("wechat.archive.set_conversation_status", "Change a detected conversation to included, excluded, or pending. Obtain explicit user confirmation before setting included; only registered profile roots can be used.", object_schema({**archive_profile_schema, "username": string_schema("Stable conversation username."), "status": string_schema("included, excluded, or pending.", enum=["included", "excluded", "pending"])}, required=["profile_id", "username", "status"]), _archive_set_conversation_status, package="wechat.archive", read_only=False, destructive=True)
+    _register("wechat.archive.run_sync", "Start a realtime-only incremental sync for a registered profile. This writes archive files and must be requested by the user.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_run_sync, package="wechat.archive", read_only=False, destructive=True)
+    _register("wechat.archive.cancel_sync", "Request cancellation of the active sync for a registered profile.", object_schema(archive_profile_schema, required=["profile_id"]), _archive_cancel_sync, package="wechat.archive", read_only=False, destructive=False)
 
     _register("wechat.contacts.list_contacts", "List contacts, groups, and official accounts with optional fuzzy keyword filtering. Defaults to direct realtime WCDB.", object_schema({**COMMON_ACCOUNT, **PAGING, **CHAT_SOURCE, "keyword": string_schema("Optional fuzzy keyword."), "include_friends": bool_schema("Include friends.", default=True), "include_groups": bool_schema("Include groups.", default=True), "include_officials": bool_schema("Include official accounts.", default=True)}), _list_contacts, package="wechat.contacts")
     _register("wechat.contacts.resolve_contact", "Resolve a fuzzy person/group/official-account clue to contact candidates.", object_schema({**COMMON_ACCOUNT, "query": string_schema("Fuzzy contact clue."), "limit": int_schema("Maximum candidates.", minimum=1, maximum=50)}, required=["query"]), _resolve_contact, package="wechat.contacts")
