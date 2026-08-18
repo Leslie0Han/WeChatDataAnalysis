@@ -954,6 +954,50 @@ export const useApi = () => {
     return await request(url)
   }
 
+  const listWorkArchiveProfiles = async () => await request('/work-archive/profiles')
+
+  const updateWorkArchiveProfile = async (profileId, payload = {}) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}`,
+    { method: 'PUT', body: payload },
+  )
+
+  const preflightWorkArchive = async (payload = {}) => await request('/work-archive/adoption/preflight', {
+    method: 'POST',
+    body: payload,
+  })
+
+  const adoptWorkArchive = async (payload = {}) => await request('/work-archive/adoption', {
+    method: 'POST',
+    body: payload,
+  })
+
+  const getWorkArchiveStatus = async (profileId) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/status`,
+  )
+
+  const getWorkArchivePending = async (profileId) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/pending`,
+  )
+
+  const setWorkArchiveConversationStatus = async (profileId, username, status) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/conversations/status`,
+    { method: 'POST', body: { username, status } },
+  )
+
+  const runWorkArchiveSync = async (profileId) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/sync`,
+    { method: 'POST' },
+  )
+
+  const cancelWorkArchiveSync = async (profileId) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/cancel`,
+    { method: 'POST' },
+  )
+
+  const verifyWorkArchive = async (profileId) => await request(
+    `/work-archive/profiles/${encodeURIComponent(profileId)}/verify`,
+  )
+
   const getImgHelperStatus = async () => {
     return await request('/system/img_helper/status')
   }
@@ -980,6 +1024,16 @@ export const useApi = () => {
 
   return {
     pickSystemDirectory,
+    listWorkArchiveProfiles,
+    updateWorkArchiveProfile,
+    preflightWorkArchive,
+    adoptWorkArchive,
+    getWorkArchiveStatus,
+    getWorkArchivePending,
+    setWorkArchiveConversationStatus,
+    runWorkArchiveSync,
+    cancelWorkArchiveSync,
+    verifyWorkArchive,
     getImgHelperStatus,
     toggleImgHelper,
     getCdnImageStatus,

@@ -228,6 +228,23 @@
         </div>
       </div>
 
+      <!-- Work archive -->
+      <div
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        title="工作归档"
+        @click="goWorkArchive"
+      >
+        <div class="sidebar-rail-plate w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center transition-colors bg-transparent">
+          <div class="sidebar-rail-icon w-[var(--sidebar-rail-icon)] h-[var(--sidebar-rail-icon)]" :class="{ 'sidebar-rail-icon-active': isWorkArchiveRoute }">
+            <svg class="w-full h-full" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7.5h16v12H4z" />
+              <path d="M7 4.5h10l1.5 3H5.5z" />
+              <path d="M9 12h6M12 9v6" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
       <!-- Privacy -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
@@ -723,6 +740,7 @@ const isMiniProgramsRoute = computed(() => route.path?.startsWith('/mini-program
 const isFinderRoute = computed(() => route.path?.startsWith('/finder'))
 const isPaymentsRoute = computed(() => route.path?.startsWith('/payments'))
 const isWrappedRoute = computed(() => route.path?.startsWith('/wrapped'))
+const isWorkArchiveRoute = computed(() => route.path?.startsWith('/work-archive'))
 
 const goChat = async () => { await navigateTo('/chat') }
 const goSns = async () => { await navigateTo('/sns') }
@@ -733,6 +751,7 @@ const goMiniPrograms = async () => { await navigateTo('/mini-programs') }
 const goFinder = async () => { await navigateTo('/finder') }
 const goPayments = async () => { await navigateTo('/payments') }
 const goWrapped = async () => { await navigateTo('/wrapped') }
+const goWorkArchive = async () => { await navigateTo('/work-archive') }
 const goGuide = async () => { await navigateTo('/') }
 const goSettings = () => { openSettingsDialog() }
 
