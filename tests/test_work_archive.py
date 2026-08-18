@@ -270,6 +270,48 @@ def test_archive_adapter_preserves_exact_eight_fields():
     assert result["sender_wxid"] == "stable-user"
 
 
+def test_archive_adapter_uses_legacy_type_vocabulary():
+    message = {
+        "createTime": 100,
+        "senderUsername": "stable-user",
+        "renderType": "link",
+        "_archiveType": "公众号",
+        "content": "article",
+    }
+    result = work_archive._record_from_message(message, {})
+    assert result["type"] == "公众号"
+    assert result["content"] == "【公众号】article"
+    assert result["card"]["type"] == "公众号"
+
+
+def test_archive_prefix_accepts_known_legacy_parser_differences():
+    row = SimpleNamespace(local_type=1)
+    base_message = {
+        "createTime": 100,
+        "senderUsername": "sender",
+        "renderType": "text",
+        "content": "decoded binary payload",
+    }
+    with patch.object(work_archive.chat_export, "_parse_message_for_export", return_value=base_message):
+        assert work_archive._archive_record_matches_source_row(
+            {**_record(100), "type": "binary", "sender_wxid": "sender"}, row, "conversation"
+        )
+        assert not work_archive._archive_record_matches_source_row(
+            {**_record(101), "type": "binary", "sender_wxid": "sender"}, row, "conversation"
+        )
+        assert not work_archive._archive_record_matches_source_row(
+            {**_record(100), "type": "text", "sender_wxid": "other"}, row, "conversation"
+        )
+
+    system_message = {**base_message, "senderUsername": "resolved-sender", "renderType": "system"}
+    with patch.object(work_archive.chat_export, "_parse_message_for_export", return_value=system_message):
+        assert work_archive._archive_record_matches_source_row(
+            {**_record(100), "type": "system", "sender_wxid": ""},
+            SimpleNamespace(local_type=10000),
+            "conversation",
+        )
+
+
 def test_pending_media_queue_survives_restart(tmp_path: Path):
     profile = _profile(tmp_path / "archive")
     first = work_archive.WorkArchiveState(profile)

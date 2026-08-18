@@ -33,6 +33,30 @@ logger = get_logger(__name__)
 PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 ARCHIVE_FIELDS = ("time", "ts", "sender", "sender_wxid", "type", "content", "archived", "card")
 MEDIA_RETRY_SECONDS = (30, 120, 600, 3600)
+URL_RE = re.compile(r"https?://[^\s，。、]+", re.IGNORECASE)
+LEGACY_LOCAL_TYPE_LABELS = {
+    3: "image",
+    34: "voice",
+    43: "video",
+    47: "emoji",
+    48: "location",
+    49: "file",
+    10000: "system",
+    25769803825: "file",
+    244813135921: "file",
+}
+LEGACY_SOURCE_TYPE_COMPATIBILITY = {
+    "公众号": {"link"},
+    "链接卡片": {"link", "text"},
+    "聊天记录转发": {"chathistory"},
+    "视频号": {"chathistory", "link"},
+    "通话": {"voip"},
+    "小程序": {"link", "miniprogram"},
+    "binary": {"text"},
+    "file": {"file", "quote"},
+    "link": {"text", "link"},
+    "longtext": {"text"},
+}
 
 
 def _now() -> int:
@@ -372,12 +396,48 @@ def _materialize_local_media(account_dir: Path, username: str, conversation_dir:
     return sink.last_relative if arc else ""
 
 
-def _card_from_message(msg: dict[str, Any]) -> Optional[dict[str, str]]:
+def _legacy_archive_type(row: Any, msg: dict[str, Any]) -> str:
+    local_type = int(getattr(row, "local_type", 0) or 0)
+    if local_type == 1:
+        content = str(msg.get("content") or "")
+        if URL_RE.search(content):
+            return "link"
+        if len(content) > 400:
+            return "longtext"
+        return "text"
+    if local_type in LEGACY_LOCAL_TYPE_LABELS:
+        return LEGACY_LOCAL_TYPE_LABELS[local_type]
+
+    render_type = str(msg.get("renderType") or "text")
+    render_key = render_type.lower()
+    if render_key == "chathistory":
+        return "聊天记录转发"
+    if render_key == "voip":
+        return "通话"
+    if render_key == "channels":
+        return "视频号"
+    if render_key == "miniprogram":
+        return "小程序"
+    if render_key == "link":
+        link_text = " ".join(str(msg.get(key) or "") for key in ("url", "content"))
+        return "公众号" if "mp.weixin.qq.com" in link_text.lower() else "链接卡片"
+    return render_type
+
+
+def _legacy_type_is_compatible(archive_type: str, source_type: str) -> bool:
+    archive_value = str(archive_type or "text")
+    source_value = str(source_type or "text").lower()
+    return archive_value.lower() == source_value or source_value in LEGACY_SOURCE_TYPE_COMPATIBILITY.get(
+        archive_value, set()
+    )
+
+
+def _card_from_message(msg: dict[str, Any], archive_type: str = "") -> Optional[dict[str, str]]:
     render_type = str(msg.get("renderType") or "")
-    if render_type not in {"link", "quote", "chathistory", "miniprogram", "channels"}:
+    if render_type.lower() not in {"link", "quote", "chathistory", "miniprogram", "channels"}:
         return None
     return {
-        "type": render_type,
+        "type": archive_type or render_type,
         "title": str(msg.get("title") or msg.get("quoteTitle") or ""),
         "url": str(msg.get("url") or ""),
         "des": str(msg.get("content") or msg.get("quoteContent") or ""),
@@ -390,6 +450,7 @@ def _record_from_message(msg: dict[str, Any], display_names: dict[str, str], arc
     sender_username = str(msg.get("senderUsername") or "").strip()
     sender = str(msg.get("senderDisplayName") or display_names.get(sender_username) or sender_username or "未知")
     render_type = str(msg.get("renderType") or "text")
+    archive_type = str(msg.get("_archiveType") or render_type)
     content = str(msg.get("content") or "").strip()
     if archived:
         filename = Path(archived).name
@@ -405,18 +466,23 @@ def _record_from_message(msg: dict[str, Any], display_names: dict[str, str], arc
             content = f"【表情】[{filename}]({archived})"
     elif render_type in {"image", "video", "file", "voice", "emoji"}:
         content = content or f"【{render_type}】"
-    elif render_type == "link" and not content.startswith("【链接】"):
+    elif archive_type in {"公众号", "链接卡片", "聊天记录转发", "视频号", "通话", "小程序"}:
+        if not content.startswith(f"【{archive_type}】"):
+            content = f"【{archive_type}】{content}"
+    elif archive_type == "link" and not content.startswith("【链接】"):
         content = f"【链接】{content}"
+    elif archive_type == "longtext" and not content.startswith("【长文】"):
+        content = f"【长文】{content}"
     local_time = dt.datetime.fromtimestamp(timestamp)
     return {
         "time": local_time.strftime("%Y-%m-%d %H:%M"),
         "ts": timestamp,
         "sender": sender,
         "sender_wxid": sender_username,
-        "type": render_type,
+        "type": archive_type,
         "content": content,
         "archived": archived or None,
-        "card": _card_from_message(msg),
+        "card": _card_from_message(msg, archive_type),
     }
 
 
@@ -432,11 +498,14 @@ def _archive_record_matches_source_row(record: dict[str, Any], row: Any, usernam
         )
     except Exception:
         return False
-    return (
-        int(record.get("ts") or 0) == int(msg.get("createTime") or 0)
-        and str(record.get("sender_wxid") or "") == str(msg.get("senderUsername") or "")
-        and str(record.get("type") or "text") == str(msg.get("renderType") or "text")
-    )
+    archive_type = str(record.get("type") or "text")
+    source_type = str(msg.get("renderType") or "text")
+    if int(record.get("ts") or 0) != int(msg.get("createTime") or 0):
+        return False
+    if not _legacy_type_is_compatible(archive_type, source_type):
+        return False
+    sender_matches = str(record.get("sender_wxid") or "") == str(msg.get("senderUsername") or "")
+    return sender_matches or archive_type in {"system", "链接卡片"}
 
 
 def _render_markdown(name: str, username: str, records: list[dict[str, Any]]) -> str:
@@ -957,6 +1026,7 @@ class WorkArchiveService:
             )
             sender_username = str(msg.get("senderUsername") or "")
             msg["senderDisplayName"] = display_names.get(sender_username, sender_username)
+            msg["_archiveType"] = _legacy_archive_type(row, msg)
             archived = _materialize_local_media(account_dir, username, conversation_dir, msg)
             record = _record_from_message(msg, display_names, archived)
             new_records.append(record)
