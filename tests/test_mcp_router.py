@@ -747,7 +747,7 @@ class TestMcpRouter(unittest.TestCase):
                 self.assertEqual(structured["status"], "success")
                 self.assertIn(path_part, structured[url_key])
 
-    def test_exposed_mcp_tools_are_read_only(self):
+    def test_exposed_mcp_tools_are_read_only_except_explicit_archive_writes(self):
         client = self._client()
 
         resp = client.post("/mcp", json=self._rpc("tools/list"))
@@ -755,11 +755,23 @@ class TestMcpRouter(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         tools = resp.json()["result"]["tools"]
         self.assertTrue(tools)
+        archive_writes = {
+            "wechat.archive.set_conversation_status": True,
+            "wechat.archive.run_sync": True,
+            "wechat.archive.cancel_sync": False,
+        }
         for tool in tools:
             with self.subTest(tool_name=tool["name"]):
                 annotations = tool.get("annotations") or {}
-                self.assertTrue(annotations.get("readOnlyHint"))
-                self.assertFalse(annotations.get("destructiveHint"))
+                if tool["name"] in archive_writes:
+                    self.assertFalse(annotations.get("readOnlyHint"))
+                    self.assertEqual(
+                        annotations.get("destructiveHint"),
+                        archive_writes[tool["name"]],
+                    )
+                else:
+                    self.assertTrue(annotations.get("readOnlyHint"))
+                    self.assertFalse(annotations.get("destructiveHint"))
 
     def test_analytics_schema_does_not_expose_refresh(self):
         client = self._client()
