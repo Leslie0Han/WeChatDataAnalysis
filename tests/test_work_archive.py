@@ -69,6 +69,18 @@ def test_profile_rejects_relative_archive_root():
         )
 
 
+def test_profile_store_rejects_two_profiles_using_same_archive_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("WECHAT_TOOL_OUTPUT_DIR", str(tmp_path / "output"))
+    store = work_archive.WorkArchiveProfileStore()
+    root = tmp_path / "archive"
+    store.save(_profile(root))
+
+    with pytest.raises(ValueError, match="different archiveRoot"):
+        store.save(_profile(root, id="renovation", name="Renovation"))
+
+
 def test_state_deduplicates_server_and_fallback_keys_with_same_second(tmp_path: Path):
     profile = _profile(tmp_path / "archive")
     state = work_archive.WorkArchiveState(profile)

@@ -175,6 +175,13 @@ class WorkArchiveProfileStore:
     def save(self, profile: WorkArchiveProfile) -> WorkArchiveProfile:
         profile.validate()
         profiles = self.list()
+        archive_root = os.path.normcase(os.path.abspath(profile.archiveRoot))
+        for current in profiles:
+            if current.id == profile.id:
+                continue
+            current_root = os.path.normcase(os.path.abspath(current.archiveRoot))
+            if current_root == archive_root:
+                raise ValueError("Each archive profile must use a different archiveRoot.")
         replaced = False
         for index, current in enumerate(profiles):
             if current.id == profile.id:

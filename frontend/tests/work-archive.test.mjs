@@ -24,5 +24,13 @@ test('work archive route is reachable and uses the API base once', () => {
   assert.match(sidebar, /goWorkArchive/)
   assert.match(sidebar, /\/work-archive/)
   assert.match(api, /listWorkArchiveProfiles/)
+  assert.match(api, /createWorkArchiveProfile/)
   assert.doesNotMatch(api, /\/api\/work-archive/)
+})
+
+test('work archive page can create and switch independent archive profiles', () => {
+  assert.match(page, /新建归档/)
+  assert.match(page, /创建空白归档/)
+  assert.match(page, /switchProfile/)
+  assert.match(page, /createWorkArchiveProfile/)
 })

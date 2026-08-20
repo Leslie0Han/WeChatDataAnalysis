@@ -6,16 +6,65 @@
         <h1>工作归档</h1>
         <p>微信与本软件保持运行时增量写入；退出期间的消息会在下次启动后追赶。</p>
       </div>
-      <button class="secondary" :disabled="loading" @click="refreshAll">刷新状态</button>
+      <div class="header-actions">
+        <button v-if="profiles.length && !showNewArchive" class="secondary" @click="openNewArchive">新建归档</button>
+        <button class="secondary" :disabled="loading" @click="refreshAll">刷新状态</button>
+      </div>
     </header>
 
-    <section v-if="!profile" class="panel setup-panel">
+    <section v-if="profiles.length && !showNewArchive" class="panel profile-toolbar">
+      <label>
+        <span>当前归档</span>
+        <select :value="profile?.id || ''" @change="switchProfile">
+          <option v-for="item in profiles" :key="item.id" :value="item.id">{{ item.name }}</option>
+        </select>
+      </label>
+      <small>每个归档使用独立目录、会话清单和同步开关。</small>
+    </section>
+
+    <section v-if="showNewArchive" class="panel setup-panel">
+      <div class="panel-title">
+        <div>
+          <h2>新建归档</h2>
+          <p>创建独立目录后，只扫描会话身份；确认纳入前不读取聊天内容。</p>
+        </div>
+        <span class="step-badge">空白归档</span>
+      </div>
+
+      <label>
+        <span>归档名称</span>
+        <input v-model="newArchive.name" placeholder="例如：装修归档" />
+      </label>
+      <label>
+        <span>微信账号</span>
+        <select v-model="newArchive.account">
+          <option value="">请选择账号</option>
+          <option v-for="account in accounts" :key="account" :value="account">{{ account }}</option>
+        </select>
+      </label>
+      <label>
+        <span>归档根目录</span>
+        <div class="path-row">
+          <input v-model="newArchive.archiveRoot" placeholder="选择一个与其他归档不同的目录" />
+          <button class="secondary" :disabled="picking" @click="chooseNewDirectory">{{ picking ? '选择中…' : '选择目录' }}</button>
+        </div>
+      </label>
+      <div class="actions">
+        <button class="secondary" @click="cancelNewArchive">取消</button>
+        <button class="primary" :disabled="!canCreateArchive || working" @click="createNewArchive">创建空白归档</button>
+      </div>
+    </section>
+
+    <section v-else-if="!profile" class="panel setup-panel">
       <div class="panel-title">
         <div>
           <h2>接管现有归档</h2>
           <p>先只读核验目录、八字段 JSON、manifest、本地媒体与实时源消息数。</p>
         </div>
-        <span class="step-badge">首次设置</span>
+        <div class="pending-head-actions">
+          <button class="secondary compact" @click="openNewArchive">新建空白归档</button>
+          <span class="step-badge">首次设置</span>
+        </div>
       </div>
 
       <label>
@@ -137,6 +186,7 @@ const apiBase = useApiBase()
 const accountStore = useChatAccountsStore()
 const { switchableAccounts, selectedAccount } = storeToRefs(accountStore)
 
+const profiles = ref([])
 const profile = ref(null)
 const status = ref({})
 const pending = ref([])
@@ -147,10 +197,15 @@ const picking = ref(false)
 const message = ref('')
 const messageType = ref('success')
 const setup = reactive({ account: '', archiveRoot: '' })
+const newArchive = reactive({ name: '', account: '', archiveRoot: '' })
+const showNewArchive = ref(false)
 let eventSource = null
 
 const accounts = computed(() => Array.isArray(switchableAccounts.value) ? switchableAccounts.value : [])
 const canPreflight = computed(() => setup.account.trim() && setup.archiveRoot.trim())
+const canCreateArchive = computed(() => (
+  newArchive.name.trim() && newArchive.account.trim() && newArchive.archiveRoot.trim()
+))
 const blockedDetails = computed(() => (preflight.value?.details || []).filter((item) => item.errors?.length))
 const stateLabel = computed(() => ({
   disabled: '已关闭', idle: '等待变化', running: '正在归档', debouncing: '等待静默',
@@ -188,10 +243,82 @@ const chooseDirectory = async () => {
   }
 }
 
-const loadProfile = async () => {
+const chooseNewDirectory = async () => {
+  if (!process.client) return
+  picking.value = true
+  try {
+    if (window.wechatDesktop?.chooseDirectory) {
+      const result = await window.wechatDesktop.chooseDirectory({ title: '选择新归档目录' })
+      if (!result?.canceled && result?.filePaths?.[0]) newArchive.archiveRoot = String(result.filePaths[0])
+    } else {
+      const result = await api.pickSystemDirectory({ title: '选择新归档目录', initial_dir: newArchive.archiveRoot })
+      if (result?.path) newArchive.archiveRoot = String(result.path)
+    }
+  } catch (error) {
+    notify(error?.message || '选择目录失败', 'error')
+  } finally {
+    picking.value = false
+  }
+}
+
+const loadProfiles = async (preferredId = '') => {
   const result = await api.listWorkArchiveProfiles()
-  profile.value = result?.profiles?.[0] || null
+  profiles.value = Array.isArray(result?.profiles) ? result.profiles : []
+  const wanted = preferredId || profile.value?.id || ''
+  profile.value = profiles.value.find((item) => item.id === wanted) || profiles.value[0] || null
   if (profile.value) setup.account = profile.value.account
+}
+
+const switchProfile = async (event) => {
+  const selected = profiles.value.find((item) => item.id === event.target.value)
+  if (!selected || selected.id === profile.value?.id) return
+  eventSource?.close()
+  profile.value = selected
+  status.value = {}
+  pending.value = []
+  await loadRuntime()
+  connectEvents()
+}
+
+const openNewArchive = () => {
+  newArchive.name = ''
+  newArchive.account = profile.value?.account || setup.account || selectedAccount.value || accounts.value[0] || ''
+  newArchive.archiveRoot = ''
+  showNewArchive.value = true
+}
+
+const cancelNewArchive = () => {
+  showNewArchive.value = false
+}
+
+const createNewArchive = async () => {
+  working.value = true
+  try {
+    const id = `archive-${Date.now().toString(36)}`
+    const result = await api.createWorkArchiveProfile({
+      id,
+      name: newArchive.name.trim(),
+      account: newArchive.account.trim(),
+      archiveRoot: newArchive.archiveRoot.trim(),
+      enabled: false,
+      includedUsernames: [],
+      pendingUsernames: [],
+      excludedUsernames: [],
+      conversations: {},
+      pendingMeta: {},
+      mediaPolicy: 'local_only',
+    })
+    showNewArchive.value = false
+    await loadProfiles(result.profile.id)
+    await api.runWorkArchiveSync(result.profile.id)
+    status.value = { state: 'running' }
+    connectEvents()
+    notify('归档已创建，正在扫描可供选择的会话身份。自动归档仍为关闭。')
+  } catch (error) {
+    notify(error?.message || '创建归档失败', 'error')
+  } finally {
+    working.value = false
+  }
 }
 
 const loadRuntime = async () => {
@@ -209,7 +336,7 @@ const refreshAll = async () => {
   try {
     await accountStore.ensureLoaded()
     if (!setup.account) setup.account = selectedAccount.value || accounts.value[0] || ''
-    await loadProfile()
+    await loadProfiles()
     await loadRuntime()
     connectEvents()
   } catch (error) {
@@ -238,6 +365,7 @@ const adopt = async () => {
       id: 'work-chats', name: '工作聊天', account: setup.account, archiveRoot: setup.archiveRoot,
     })
     profile.value = result.profile
+    await loadProfiles(result.profile.id)
     await loadRuntime()
     connectEvents()
     notify('接管完成。自动归档仍为关闭状态，请明确开启。')
@@ -299,7 +427,7 @@ const verifyArchive = async () => {
 
 const decide = async (username, decision) => {
   await api.setWorkArchiveConversationStatus(profile.value.id, username, decision)
-  await loadProfile()
+  await loadProfiles(profile.value.id)
   await loadRuntime()
 }
 
@@ -338,7 +466,10 @@ const connectEvents = () => {
   eventSource?.close()
   const base = String(apiBase || '').replace(/\/$/, '')
   eventSource = new EventSource(`${base}/work-archive/profiles/${encodeURIComponent(profile.value.id)}/events`)
-  const refresh = () => { void loadProfile().then(loadRuntime) }
+  const refresh = () => {
+    const profileId = profile.value?.id || ''
+    void loadProfiles(profileId).then(loadRuntime)
+  }
   for (const event of ['sync_started', 'sync_progress', 'sync_finished', 'sync_error', 'sync_cancelled', 'pending_discovered']) {
     eventSource.addEventListener(event, refresh)
   }
@@ -351,6 +482,7 @@ onBeforeUnmount(() => eventSource?.close())
 <style scoped>
 .archive-page { min-height: 100%; padding: 36px clamp(22px, 4vw, 58px) 64px; background: var(--app-bg, #f5f7f6); color: var(--app-text, #1f2924); }
 .archive-header, .panel-title, .control-panel, .pending-item { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.header-actions { display: flex; align-items: center; gap: 10px; }
 .archive-header { margin: 0 auto 28px; max-width: 1120px; align-items: flex-end; }
 .archive-header h1 { margin: 4px 0 8px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
 .archive-header p, .panel p { margin: 0; color: #718078; }
@@ -360,6 +492,9 @@ onBeforeUnmount(() => eventSource?.close())
 .panel h2 { margin: 0 0 5px; font-size: 18px; }
 .setup-panel { display: grid; gap: 20px; }
 .setup-panel label { display: grid; gap: 8px; font-size: 12px; font-weight: 700; }
+.profile-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.profile-toolbar label { display: grid; gap: 7px; min-width: min(360px, 100%); font-size: 12px; font-weight: 700; }
+.profile-toolbar small { color: #8c9992; }
 input, select { width: 100%; min-width: 0; border: 1px solid #d9e1dd; border-radius: 10px; background: #fff; padding: 11px 12px; outline: none; }
 input:focus, select:focus { border-color: #07b75b; box-shadow: 0 0 0 3px rgba(7,183,91,.1); }
 .path-row, .actions, .control-actions, .pending-actions { display: flex; gap: 10px; align-items: center; }
@@ -391,6 +526,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .empty-state { margin-top: 18px; border: 1px dashed #d7e0db; border-radius: 12px; padding: 28px; text-align: center; color: #8b9891; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 30; max-width: min(420px, calc(100vw - 48px)); border-radius: 10px; padding: 12px 16px; background: #163c29; color: #fff; box-shadow: 0 10px 35px rgba(0,0,0,.18); }
 .toast.error { background: #8f2f2f; }
-@media (max-width: 860px) { .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .control-panel, .archive-header { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 860px) { .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .control-panel, .archive-header, .profile-toolbar { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 560px) { .archive-page { padding: 22px 14px 50px; } .status-grid { grid-template-columns: 1fr; } .path-row, .actions, .control-actions, .pending-item { align-items: stretch; flex-direction: column; } .pending-actions button { flex: 1; } }
 </style>

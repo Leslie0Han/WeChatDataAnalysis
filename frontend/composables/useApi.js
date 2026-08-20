@@ -956,6 +956,11 @@ export const useApi = () => {
 
   const listWorkArchiveProfiles = async () => await request('/work-archive/profiles')
 
+  const createWorkArchiveProfile = async (payload = {}) => await request('/work-archive/profiles', {
+    method: 'POST',
+    body: payload,
+  })
+
   const updateWorkArchiveProfile = async (profileId, payload = {}) => await request(
     `/work-archive/profiles/${encodeURIComponent(profileId)}`,
     { method: 'PUT', body: payload },
@@ -1025,6 +1030,7 @@ export const useApi = () => {
   return {
     pickSystemDirectory,
     listWorkArchiveProfiles,
+    createWorkArchiveProfile,
     updateWorkArchiveProfile,
     preflightWorkArchive,
     adoptWorkArchive,
