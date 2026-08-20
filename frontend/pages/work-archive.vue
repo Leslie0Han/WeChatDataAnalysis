@@ -149,7 +149,7 @@
           </div>
           <div class="pending-head-actions">
             <button
-              v-if="pending.length"
+              v-if="pending.length && profile.adoptedAt"
               class="secondary compact"
               :disabled="working"
               @click="excludeCurrentPendingAsBaseline"
@@ -457,7 +457,7 @@ const excludeCurrentPendingAsBaseline = async () => {
 }
 
 const includeConversation = async (item) => {
-  if (!window.confirm(`确认把“${item.displayName || item.username}”纳入工作归档吗？`)) return
+  if (!window.confirm(`确认把“${item.displayName || item.username}”纳入“${profile.value?.name || '当前归档'}”吗？`)) return
   await decide(item.username, 'included')
 }
 
