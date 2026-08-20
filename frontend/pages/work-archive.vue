@@ -7,12 +7,13 @@
         <p>微信与本软件保持运行时增量写入；退出期间的消息会在下次启动后追赶。</p>
       </div>
       <div class="header-actions">
-        <button v-if="profiles.length && !showNewArchive" class="secondary" @click="openNewArchive">新建归档</button>
+        <button v-if="profiles.length && !showNewArchive && !showAdoptArchive" class="secondary" @click="openAdoptArchive">接管已有归档</button>
+        <button v-if="profiles.length && !showNewArchive && !showAdoptArchive" class="secondary" @click="openNewArchive">新建空白归档</button>
         <button class="secondary" :disabled="loading" @click="refreshAll">刷新状态</button>
       </div>
     </header>
 
-    <section v-if="profiles.length && !showNewArchive" class="panel profile-toolbar">
+    <section v-if="profiles.length && !showNewArchive && !showAdoptArchive" class="panel profile-toolbar">
       <label>
         <span>当前归档</span>
         <select :value="profile?.id || ''" @change="switchProfile">
@@ -55,17 +56,23 @@
       </div>
     </section>
 
-    <section v-else-if="!profile" class="panel setup-panel">
+    <section v-else-if="showAdoptArchive || !profile" class="panel setup-panel">
       <div class="panel-title">
         <div>
-          <h2>接管现有归档</h2>
+          <h2>{{ showAdoptArchive ? '接管另一份已有归档' : '接管现有归档' }}</h2>
           <p>先只读核验目录、八字段 JSON、manifest、本地媒体与实时源消息数。</p>
         </div>
         <div class="pending-head-actions">
-          <button class="secondary compact" @click="openNewArchive">新建空白归档</button>
-          <span class="step-badge">首次设置</span>
+          <button v-if="showAdoptArchive" class="secondary compact" @click="cancelAdoptArchive">取消</button>
+          <button v-else class="secondary compact" @click="openNewArchive">新建空白归档</button>
+          <span class="step-badge">{{ showAdoptArchive ? '已有归档' : '首次设置' }}</span>
         </div>
       </div>
+
+      <label v-if="showAdoptArchive">
+        <span>归档名称</span>
+        <input v-model="setup.name" placeholder="例如：装修归档" />
+      </label>
 
       <label>
         <span>微信账号</span>
@@ -84,7 +91,7 @@
 
       <div class="actions">
         <button class="secondary" :disabled="!canPreflight || working" @click="runPreflight">接管预检</button>
-        <button class="primary" :disabled="!preflight?.ok || working" @click="adopt">确认接管</button>
+        <button class="primary" :disabled="!canAdopt || working" @click="adopt">确认接管</button>
       </div>
 
       <div v-if="preflight" class="result" :class="preflight.ok ? 'success' : 'error'">
@@ -196,13 +203,15 @@ const working = ref(false)
 const picking = ref(false)
 const message = ref('')
 const messageType = ref('success')
-const setup = reactive({ account: '', archiveRoot: '' })
+const setup = reactive({ name: '', account: '', archiveRoot: '' })
 const newArchive = reactive({ name: '', account: '', archiveRoot: '' })
 const showNewArchive = ref(false)
+const showAdoptArchive = ref(false)
 let eventSource = null
 
 const accounts = computed(() => Array.isArray(switchableAccounts.value) ? switchableAccounts.value : [])
 const canPreflight = computed(() => setup.account.trim() && setup.archiveRoot.trim())
+const canAdopt = computed(() => preflight.value?.ok && (!showAdoptArchive.value || setup.name.trim()))
 const canCreateArchive = computed(() => (
   newArchive.name.trim() && newArchive.account.trim() && newArchive.archiveRoot.trim()
 ))
@@ -284,11 +293,26 @@ const openNewArchive = () => {
   newArchive.name = ''
   newArchive.account = profile.value?.account || setup.account || selectedAccount.value || accounts.value[0] || ''
   newArchive.archiveRoot = ''
+  showAdoptArchive.value = false
   showNewArchive.value = true
 }
 
 const cancelNewArchive = () => {
   showNewArchive.value = false
+}
+
+const openAdoptArchive = () => {
+  setup.name = ''
+  setup.account = profile.value?.account || selectedAccount.value || accounts.value[0] || ''
+  setup.archiveRoot = ''
+  preflight.value = null
+  showNewArchive.value = false
+  showAdoptArchive.value = true
+}
+
+const cancelAdoptArchive = () => {
+  showAdoptArchive.value = false
+  preflight.value = null
 }
 
 const createNewArchive = async () => {
@@ -361,9 +385,14 @@ const runPreflight = async () => {
 const adopt = async () => {
   working.value = true
   try {
+    const isAdditional = showAdoptArchive.value || profiles.value.length > 0
     const result = await api.adoptWorkArchive({
-      id: 'work-chats', name: '工作聊天', account: setup.account, archiveRoot: setup.archiveRoot,
+      id: isAdditional ? `archive-${Date.now().toString(36)}` : 'work-chats',
+      name: isAdditional ? setup.name.trim() : '工作聊天',
+      account: setup.account,
+      archiveRoot: setup.archiveRoot,
     })
+    showAdoptArchive.value = false
     profile.value = result.profile
     await loadProfiles(result.profile.id)
     await loadRuntime()

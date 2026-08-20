@@ -31,6 +31,8 @@ test('work archive route is reachable and uses the API base once', () => {
 test('work archive page can create and switch independent archive profiles', () => {
   assert.match(page, /新建归档/)
   assert.match(page, /创建空白归档/)
+  assert.match(page, /接管已有归档/)
+  assert.match(page, /openAdoptArchive/)
   assert.match(page, /switchProfile/)
   assert.match(page, /createWorkArchiveProfile/)
   assert.match(page, /pending\.length && profile\.adoptedAt/)
