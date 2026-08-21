@@ -18,6 +18,8 @@
     <p>如果你需要 QQ 侧的数据解密、分析或年度总结类工具，欢迎体验 <a href="https://github.com/H3CoF6/WeQ">H3CoF6/WeQ</a>；WeQ 作者也是本项目开发成员之一</p>
 </div>
 
+> 增量工作归档：桌面端新增“工作归档”页面，可在微信运行时使用 realtime WCDB 监测已确认会话，并原地更新兼容的 Markdown/JSON 归档。接管、隐私边界、恢复机制与 API/MCP 说明见 [工作归档文档](docs/work-archive.md)。
+
 ## 年度总结
 
 <table>

@@ -10,13 +10,25 @@
 
 import multiprocessing
 import os
+import sys
 from pathlib import Path
 
 # Keep standalone/frozen launches safe when scanner code uses multiprocessing.
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
+# Source checkouts are installed with ``uv sync --no-editable`` on Windows.
+# Put this checkout's package ahead of any stale wheel in the environment before
+# importing application modules; the desktop launcher invokes this file directly.
+REPO_ROOT = Path(__file__).resolve().parent
+SRC_DIR = REPO_ROOT / "src"
+if SRC_DIR.is_dir():
+    src_text = str(SRC_DIR)
+    sys.path[:] = [entry for entry in sys.path if entry != src_text]
+    sys.path.insert(0, src_text)
+
 import uvicorn
+import wechat_decrypt_tool
 
 from wechat_decrypt_tool.desktop_parent_watchdog import (
     start_desktop_parent_watchdog_from_env,
@@ -31,6 +43,7 @@ from wechat_decrypt_tool.runtime_settings import (
 
 def main():
     """启动微信解密工具API服务"""
+    print(f"wechat_decrypt_tool source: {Path(wechat_decrypt_tool.__file__).resolve()}")
     start_desktop_parent_watchdog_from_env()
     configure_native_core_entrypoint()
     host, host_source = read_effective_backend_host(default="127.0.0.1")
@@ -62,7 +75,6 @@ def main():
     print("按 Ctrl+C 停止服务")
     print("=" * 60)
     
-    repo_root = Path(__file__).resolve().parent
     enable_reload = os.environ.get("WECHAT_TOOL_RELOAD", "0") == "1"
 
     # 启动API服务
@@ -71,7 +83,7 @@ def main():
         host=host,
         port=port,
         reload=enable_reload,
-        reload_dirs=[str(repo_root / "src")] if enable_reload else None,
+        reload_dirs=[str(REPO_ROOT / "src")] if enable_reload else None,
         reload_excludes=[
             "output/*",
             "output/**",

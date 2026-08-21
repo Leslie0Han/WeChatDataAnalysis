@@ -23,6 +23,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 
 from .chat_helpers import _list_decrypted_accounts, _resolve_account_dir
+from .db_change_watcher import scan_db_storage_mtime_ns
 from .logging_config import get_logger
 from .wcdb_realtime import WCDB_REALTIME
 
@@ -50,49 +51,9 @@ def _env_int(name: str, default: int, *, min_v: int, max_v: int) -> int:
 
 
 def _scan_db_storage_mtime_ns(db_storage_dir: Path) -> int:
-    """Best-effort scan of db_storage for a "latest mtime" signal.
+    """Compatibility wrapper for tests and callers that imported the old helper."""
 
-    We intentionally restrict to common database buckets to reduce walk cost.
-    """
-
-    try:
-        base = str(db_storage_dir)
-    except Exception:
-        return 0
-
-    max_ns = 0
-    try:
-        for root, dirs, files in os.walk(base):
-            if root == base:
-                allow = {"message", "session", "contact", "head_image", "bizchat", "sns", "general", "favorite"}
-                dirs[:] = [d for d in dirs if str(d or "").lower() in allow]
-
-            for fn in files:
-                name = str(fn or "").lower()
-                if not name.endswith((".db", ".db-wal", ".db-shm")):
-                    continue
-                if not (
-                    ("message" in name)
-                    or ("session" in name)
-                    or ("contact" in name)
-                    or ("name2id" in name)
-                    or ("head_image" in name)
-                ):
-                    continue
-
-                try:
-                    st = os.stat(os.path.join(root, fn))
-                    m_ns = int(getattr(st, "st_mtime_ns", 0) or 0)
-                    if m_ns <= 0:
-                        m_ns = int(float(getattr(st, "st_mtime", 0.0) or 0.0) * 1_000_000_000)
-                    if m_ns > max_ns:
-                        max_ns = m_ns
-                except Exception:
-                    continue
-    except Exception:
-        return 0
-
-    return max_ns
+    return scan_db_storage_mtime_ns(db_storage_dir)
 
 
 @dataclass
@@ -264,7 +225,7 @@ class ChatRealtimeAutoSyncService:
                 continue
 
             scan_t0 = time.perf_counter()
-            mtime_ns = _scan_db_storage_mtime_ns(db_storage_dir)
+            mtime_ns = scan_db_storage_mtime_ns(db_storage_dir)
             scan_ms = (time.perf_counter() - scan_t0) * 1000.0
             if scan_ms > 2000:
                 logger.warning("[realtime-autosync] scan slow account=%s ms=%.1f", acc, scan_ms)
